@@ -9,5 +9,6 @@ def get_connection():
             password= '',
             database= 'avian'
         )
+        return connection
     except mysql.connector.Error as err:
         raise err
