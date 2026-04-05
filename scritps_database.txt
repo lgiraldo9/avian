@@ -1,0 +1,336 @@
+-- ============================================================
+--  BASE DE DATOS: Sistema de Vuelos
+--  Motor: MySQL (XAMPP)
+-- ============================================================
+
+-- Creamos la base de datos si no existe todavia
+-- CHARACTER SET utf8mb4 permite guardar tildes, ñ y emojis sin problemas
+-- COLLATE utf8mb4_unicode_ci define como se comparan y ordenan los textos
+CREATE DATABASE IF NOT EXISTS vuelos_db
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+
+-- Le decimos a MySQL que use esta base de datos para todo lo que sigue
+USE vuelos_db;
+
+
+-- ============================================================
+--  TABLA: ciudades
+--  Guarda todas las ciudades que pueden ser origen o destino
+--  de un vuelo. Un vuelo tiene DOS ciudades: la de salida
+--  y la de llegada. Por eso los vuelos referencian esta tabla
+--  dos veces (ciudad_origen_id y ciudad_destino_id).
+-- ============================================================
+CREATE TABLE ciudades (
+    -- Identificador unico de cada ciudad, se incrementa solo (1, 2, 3...)
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Nombre completo de la ciudad, ej: "Barranquilla"
+    nombre      VARCHAR(100) NOT NULL,
+
+    -- Codigo de 3 letras que usan los aeropuertos internacionalmente
+    -- ej: BAQ = Barranquilla, BOG = Bogota, MIA = Miami
+    -- UNIQUE significa que no pueden existir dos ciudades con el mismo codigo
+    codigo_iata CHAR(3)      NOT NULL UNIQUE,
+
+    -- Pais donde esta la ciudad, ej: "Colombia"
+    pais        VARCHAR(100) NOT NULL
+);
+
+
+-- ============================================================
+--  TABLA: aviones
+--  Guarda la informacion de cada avion de la flota.
+--  Un avion puede operar muchos vuelos a lo largo del tiempo.
+-- ============================================================
+CREATE TABLE aviones (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Modelo del avion, ej: "Airbus A320", "Boeing 737"
+    modelo              VARCHAR(100) NOT NULL,
+
+    -- Matricula es como la placa del avion, unica para cada uno
+    -- ej: HK-5001 (HK es el prefijo de Colombia)
+    matricula           VARCHAR(20)  NOT NULL UNIQUE,
+
+    -- Aerolinea duena del avion, ej: "Avianca", "Latam"
+    aerolinea           VARCHAR(100) NOT NULL,
+
+    -- Cuantos pasajeros caben en total en el avion
+    capacidad_total     INT          NOT NULL,
+
+    -- Cuantos asientos son de primera clase (mas caros, mas comodos)
+    -- DEFAULT 0 significa que si no se especifica, se guarda 0
+    capacidad_primera   INT          NOT NULL DEFAULT 0,
+
+    -- Cuantos asientos son de clase economica (los normales)
+    capacidad_economica INT          NOT NULL DEFAULT 0
+);
+
+
+-- ============================================================
+--  TABLA: asientos
+--  Registra CADA asiento de CADA avion con su estado actual.
+--  Esto nos permite mostrar un mapa de asientos y saber
+--  cuales estan libres o tomados.
+--  Relacion: un avion tiene muchos asientos (1 a muchos)
+-- ============================================================
+CREATE TABLE asientos (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- A que avion pertenece este asiento
+    -- REFERENCES significa que este numero debe existir en la tabla aviones
+    avion_id        INT          NOT NULL,
+
+    -- El codigo del asiento tal como aparece en el tiquete
+    -- ej: "1A", "14C", "27F"
+    numero_asiento  VARCHAR(5)   NOT NULL,
+
+    -- ENUM limita los valores posibles, solo puede ser uno de estos dos
+    clase           ENUM('economica', 'primera') NOT NULL DEFAULT 'economica',
+
+    -- Estado actual del asiento:
+    -- disponible = nadie lo ha comprado
+    -- reservado  = alguien lo esta comprando en este momento
+    -- ocupado    = ya fue vendido
+    estado          ENUM('disponible', 'ocupado', 'reservado') NOT NULL DEFAULT 'disponible',
+
+    -- Le decimos a MySQL que si borramos un avion, borre tambien todos sus asientos
+    FOREIGN KEY (avion_id) REFERENCES aviones(id) ON DELETE CASCADE,
+
+    -- Un mismo avion no puede tener dos asientos con el mismo numero
+    -- La combinacion avion_id + numero_asiento debe ser unica
+    UNIQUE KEY uq_asiento_avion (avion_id, numero_asiento)
+);
+
+
+-- ============================================================
+--  TABLA: vuelos
+--  El corazon del sistema. Cada fila es un vuelo especifico
+--  con fecha, hora, origen, destino y precio.
+--  Un vuelo conecta: un avion + ciudad origen + ciudad destino
+-- ============================================================
+CREATE TABLE vuelos (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Codigo oficial del vuelo, ej: "AV101", "LA202"
+    -- UNIQUE porque no pueden existir dos vuelos con el mismo codigo
+    numero_vuelo        VARCHAR(20)  NOT NULL UNIQUE,
+
+    -- Que avion realiza este vuelo
+    avion_id            INT          NOT NULL,
+
+    -- Ciudad desde donde sale el vuelo
+    ciudad_origen_id    INT          NOT NULL,
+
+    -- Ciudad donde aterriza el vuelo
+    ciudad_destino_id   INT          NOT NULL,
+
+    -- Fecha y hora exacta de salida, ej: '2026-04-10 06:00:00'
+    fecha_salida        DATETIME     NOT NULL,
+
+    -- Fecha y hora exacta de llegada
+    fecha_llegada       DATETIME     NOT NULL,
+
+    -- Precio del tiquete en clase economica (en pesos colombianos)
+    -- DECIMAL(10,2) = hasta 10 digitos en total, 2 son decimales
+    -- ej: 250000.00
+    precio_economica    DECIMAL(10,2) NOT NULL,
+
+    -- Precio del tiquete en primera clase
+    precio_primera      DECIMAL(10,2) NOT NULL,
+
+    -- Cuantas paradas hace el vuelo antes de llegar al destino
+    -- 0 = vuelo directo
+    escalas             INT          NOT NULL DEFAULT 0,
+
+    -- Aerolinea que opera este vuelo especifico
+    aerolinea           VARCHAR(100) NOT NULL,
+
+    -- Estado actual del vuelo
+    -- programado = todavia no ha salido
+    -- en_vuelo   = ya salio y esta en el aire
+    -- aterrizado = llego a su destino
+    -- cancelado  = no se va a realizar
+    estado              ENUM('programado', 'en_vuelo', 'aterrizado', 'cancelado') NOT NULL DEFAULT 'programado',
+
+    -- Restricciones de llaves foraneas
+    -- ON DELETE RESTRICT = no deja borrar un avion si tiene vuelos
+    FOREIGN KEY (avion_id)          REFERENCES aviones(id)  ON DELETE RESTRICT,
+    FOREIGN KEY (ciudad_origen_id)  REFERENCES ciudades(id) ON DELETE RESTRICT,
+    FOREIGN KEY (ciudad_destino_id) REFERENCES ciudades(id) ON DELETE RESTRICT,
+
+    -- Validaciones extra:
+    -- No puede haber un vuelo de una ciudad a la misma ciudad
+    CHECK (ciudad_origen_id <> ciudad_destino_id),
+    -- La llegada siempre debe ser despues de la salida
+    CHECK (fecha_llegada > fecha_salida)
+);
+
+
+-- ============================================================
+--  TABLA: usuarios
+--  Guarda a las personas que se registran en la pagina.
+--  Un usuario puede comprar muchos tiquetes.
+-- ============================================================
+CREATE TABLE usuarios (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Nombre y apellido por separado para mayor flexibilidad
+    nombre          VARCHAR(100) NOT NULL,
+    apellido        VARCHAR(100) NOT NULL,
+
+    -- El email es el identificador de login, debe ser unico
+    email           VARCHAR(150) NOT NULL UNIQUE,
+
+    -- NUNCA se guarda la contrasena directa, sino su "hash"
+    -- Un hash es una version encriptada irreversible
+    -- Flask lo genera con werkzeug.security.generate_password_hash()
+    password_hash   VARCHAR(255) NOT NULL,
+
+    -- El telefono es opcional (NULL = puede estar vacio)
+    telefono        VARCHAR(20)  NULL,
+
+    -- Se guarda automaticamente la fecha y hora del registro
+    -- CURRENT_TIMESTAMP = fecha y hora del momento exacto
+    fecha_registro  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================
+--  TABLA: tickets
+--  Representa la compra de un pasaje. Une un usuario
+--  con un vuelo y un asiento especifico.
+--  Es la tabla central del proceso de compra.
+-- ============================================================
+CREATE TABLE tickets (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- Quien compro el tiquete
+    usuario_id      INT           NOT NULL,
+
+    -- Para que vuelo es el tiquete
+    vuelo_id        INT           NOT NULL,
+
+    -- Que asiento especifico reservo
+    -- UNIQUE aqui es importante: un asiento solo puede estar
+    -- en UN tiquete a la vez (evita doble venta)
+    asiento_id      INT           NOT NULL UNIQUE,
+
+    -- Clase del tiquete (debe coincidir con la clase del asiento)
+    clase           ENUM('economica', 'primera') NOT NULL,
+
+    -- Cuanto pago realmente el usuario (puede haber descuentos)
+    precio_pagado   DECIMAL(10,2) NOT NULL,
+
+    -- Estado del tiquete:
+    -- activo    = vigente, el pasajero puede viajar
+    -- cancelado = se cancelo la compra
+    -- usado     = el pasajero ya viajo
+    estado          ENUM('activo', 'cancelado', 'usado') NOT NULL DEFAULT 'activo',
+
+    -- Fecha y hora en que se hizo la compra
+    fecha_compra    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)  ON DELETE RESTRICT,
+    FOREIGN KEY (vuelo_id)   REFERENCES vuelos(id)    ON DELETE RESTRICT,
+    FOREIGN KEY (asiento_id) REFERENCES asientos(id)  ON DELETE RESTRICT
+);
+
+
+-- ============================================================
+--  TABLA: facturacion
+--  Guarda el comprobante de pago de cada tiquete.
+--  Cada tiquete genera exactamente UNA factura (relacion 1 a 1).
+-- ============================================================
+CREATE TABLE facturacion (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+
+    -- A que tiquete corresponde esta factura
+    -- UNIQUE aqui garantiza la relacion 1 a 1 con tickets
+    ticket_id           INT           NOT NULL UNIQUE,
+
+    -- Numero de factura para efectos legales y contables
+    -- ej: "FAC-2026-00001"
+    numero_factura      VARCHAR(50)   NOT NULL UNIQUE,
+
+    -- Valor antes de impuestos
+    subtotal            DECIMAL(10,2) NOT NULL,
+
+    -- Valor del impuesto (IVA u otro)
+    impuesto            DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+
+    -- Valor final que pago el usuario (subtotal + impuesto)
+    total               DECIMAL(10,2) NOT NULL,
+
+    -- Como pago el usuario
+    metodo_pago         ENUM('tarjeta_credito', 'tarjeta_debito', 'transferencia', 'efectivo') NOT NULL,
+
+    -- Codigo que devuelve la pasarela de pago (ej: Wompi, PayU)
+    -- NULL porque al principio puede que no uses pasarela
+    codigo_transaccion  VARCHAR(100)  NULL,
+
+    -- Fecha y hora exacta del pago
+    fecha_pago          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    -- Estado del pago:
+    -- pagado      = todo bien, el pago se proceso
+    -- pendiente   = el pago esta en proceso
+    -- reembolsado = se devolvio el dinero (por cancelacion)
+    estado_pago         ENUM('pagado', 'pendiente', 'reembolsado') NOT NULL DEFAULT 'pagado',
+
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE RESTRICT
+);
+
+
+-- ============================================================
+--  DATOS DE PRUEBA
+--  Estos INSERT agregan informacion inicial para que puedas
+--  probar la aplicacion sin tener que ingresar datos a mano.
+--  En produccion estos datos no irian aqui.
+-- ============================================================
+
+-- 8 ciudades: 5 colombianas y 3 internacionales
+INSERT INTO ciudades (nombre, codigo_iata, pais) VALUES
+('Barranquilla',     'BAQ', 'Colombia'),
+('Bogotá',           'BOG', 'Colombia'),
+('Medellín',         'MDE', 'Colombia'),
+('Cartagena',        'CTG', 'Colombia'),
+('Cali',             'CLO', 'Colombia'),
+('Miami',            'MIA', 'Estados Unidos'),
+('Ciudad de México', 'MEX', 'México'),
+('Madrid',           'MAD', 'España');
+
+-- 4 aviones de dos aerolineas colombianas
+INSERT INTO aviones (modelo, matricula, aerolinea, capacidad_total, capacidad_primera, capacidad_economica) VALUES
+('Airbus A320',  'HK-5001', 'Avianca', 150, 12, 138),
+('Boeing 737',   'HK-5002', 'Latam',   160, 16, 144),
+('Airbus A319',  'HK-5003', 'Avianca', 120,  8, 112),
+('Boeing 787',   'HK-5004', 'Latam',   250, 30, 220);
+
+-- Asientos del avion 1 (HK-5001, Airbus A320)
+-- Filas 1-2 son primera clase (12 asientos)
+INSERT INTO asientos (avion_id, numero_asiento, clase) VALUES
+(1,'1A','primera'), (1,'1B','primera'), (1,'1C','primera'),
+(1,'1D','primera'), (1,'1E','primera'), (1,'1F','primera'),
+(1,'2A','primera'), (1,'2B','primera'), (1,'2C','primera'),
+(1,'2D','primera'), (1,'2E','primera'), (1,'2F','primera'),
+-- Filas 3-4 son clase economica (muestra de 10 asientos)
+(1,'3A','economica'), (1,'3B','economica'), (1,'3C','economica'),
+(1,'3D','economica'), (1,'3E','economica'), (1,'3F','economica'),
+(1,'4A','economica'), (1,'4B','economica');
+
+-- 4 vuelos de prueba con diferentes rutas y fechas
+-- Los id de ciudades: 1=BAQ, 2=BOG, 3=MDE, 4=CTG, 6=MIA
+INSERT INTO vuelos (numero_vuelo, avion_id, ciudad_origen_id, ciudad_destino_id, fecha_salida, fecha_llegada, precio_economica, precio_primera, escalas, aerolinea, estado) VALUES
+('AV101', 1, 1, 2, '2026-04-10 06:00:00', '2026-04-10 07:30:00', 250000.00,  650000.00, 0, 'Avianca', 'programado'),
+('LA202', 2, 2, 3, '2026-04-10 08:00:00', '2026-04-10 09:00:00', 200000.00,  500000.00, 0, 'Latam',   'programado'),
+('AV303', 1, 1, 4, '2026-04-11 10:00:00', '2026-04-11 11:10:00', 220000.00,  580000.00, 0, 'Avianca', 'programado'),
+('LA404', 4, 2, 6, '2026-04-12 14:00:00', '2026-04-12 20:00:00', 850000.00, 2500000.00, 0, 'Latam',   'programado');
+
+-- Usuario de prueba para desarrollo
+-- IMPORTANTE: en Flask nunca guardes la contrasena directa
+-- Usa: from werkzeug.security import generate_password_hash
+-- y guarda: generate_password_hash('tu_contrasena')
+INSERT INTO usuarios (nombre, apellido, email, password_hash, telefono) VALUES
+('Gonzalo', 'Prueba', 'gonzalo@email.com', 'reemplazar_con_hash_real', '3001234567');
